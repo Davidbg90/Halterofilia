@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Halterofilia — Plan de Entrenamiento</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>🏋️ Halterofilia</h1>
+    <p class="subtitle">Sube el PDF de tu entrenador e introduce tus máximos</p>
+  </header>
+
+  <main>
+    <!-- ── MAXIMOS ──────────────────────────────────────── -->
+    <section class="card" id="maximos">
+      <h2>Mis máximos (kg)</h2>
+      <div class="maximos-grid">
+        <label>Arrancada (Snatch)
+          <input type="number" id="snatch" placeholder="ej. 90" step="0.5" min="0">
+        </label>
+        <label>Dos Tiempos (C&amp;J)
+          <input type="number" id="clean_jerk" placeholder="ej. 110" step="0.5" min="0">
+        </label>
+        <label>Jerk (si difiere del C&amp;J)
+          <input type="number" id="jerk" placeholder="opcional" step="0.5" min="0">
+        </label>
+        <label>Sentadilla Trasera
+          <input type="number" id="back_squat" placeholder="opcional" step="0.5" min="0">
+          <span class="field-hint">Si la dejas vacía se usa 120% del C&amp;J</span>
+        </label>
+        <label>Sentadilla Frontal
+          <input type="number" id="front_squat" placeholder="ej. 120" step="0.5" min="0">
+        </label>
+      </div>
+    </section>
+
+    <!-- ── PLAN DEL ENTRENADOR ──────────────────────────── -->
+    <section class="card" id="plan-input">
+      <h2>Plan del entrenador</h2>
+
+      <div id="drop-zone" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+        <div class="drop-inner">
+          <span class="drop-icon">📄</span>
+          <span class="drop-text">Arrastra el PDF aquí o</span>
+          <label class="btn-pdf" for="pdf-input">Selecciona fichero</label>
+          <input type="file" id="pdf-input" accept=".pdf" onchange="subirPDF(this.files[0])">
+        </div>
+        <div id="pdf-status"></div>
+      </div>
+
+      <div class="plan-divider"><span>o pega / escribe el plan manualmente</span></div>
+
+      <textarea id="plan" rows="10" placeholder="DIA 1&#10;A) Snatch&#10;1 x 3 70%&#10;3 x 1 80%&#10;&#10;B) Back squat 5 x 4 75%"></textarea>
+      <button id="btn-calcular" onclick="calcular()">Calcular pesos</button>
+    </section>
+
+    <!-- ── AVISO SENTADILLA ─────────────────────────────── -->
+    <div id="bs-aviso" class="aviso hidden"></div>
+
+    <!-- ── RESULTADO ────────────────────────────────────── -->
+    <section id="resultado" class="hidden"></section>
+  </main>
+
+  <script>
+    // ── PDF ─────────────────────────────────────────────────────────────────
+
+    function onDragOver(e) {
+      e.preventDefault();
+      document.getElementById('drop-zone').classList.add('drag-over');
+    }
+    function onDragLeave() {
+      document.getElementById('drop-zone').classList.remove('drag-over');
+    }
+    function onDrop(e) {
+      e.preventDefault();
+      document.getElementById('drop-zone').classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file && file.name.toLowerCase().endsWith('.pdf')) subirPDF(file);
+      else setStatus('error', 'Solo se aceptan ficheros PDF.');
+    }
+
+    async function subirPDF(file) {
+      if (!file) return;
+      setStatus('loading', `Leyendo "${file.name}"…`);
+      const form = new FormData();
+      form.append('pdf', file);
+      try {
+        const res  = await fetch('/subir-pdf', { method: 'POST', body: form });
+        const data = await res.json();
+        if (data.error) { setStatus('error', data.error); return; }
+        document.getElementById('plan').value = data.text;
+        setStatus('ok', `PDF cargado. ${data.text.split('\n').length} líneas extraídas. Revisa si es necesario.`);
+      } catch {
+        setStatus('error', 'No se pudo conectar con el servidor.');
+      }
+    }
+
+    function setStatus(type, msg) {
+      const el = document.getElementById('pdf-status');
+      el.className = `status-${type}`;
+      el.textContent = msg;
+    }
+
+    // ── CALCULAR ─────────────────────────────────────────────────────────────
+
+    async function calcular() {
+      const btn = document.getElementById('btn-calcular');
+      btn.textContent = 'Calculando…';
+      btn.disabled = true;
+
+      const payload = {
+        snatch:      document.getElementById('snatch').value,
+        clean_jerk:  document.getElementById('clean_jerk').value,
+        jerk:        document.getElementById('jerk').value,
+        back_squat:  document.getElementById('back_squat').value,
+        front_squat: document.getElementById('front_squat').value,
+        plan:        document.getElementById('plan').value,
+      };
+
+      const res  = await fetch('/calcular', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      // Aviso sentadilla auto
+      const aviso = document.getElementById('bs-aviso');
+      if (data.bs_auto) {
+        aviso.textContent = `ℹ️ Sentadilla Trasera: base calculada automáticamente como 120% del C&J → ${data.bs_base} kg`;
+        aviso.classList.remove('hidden');
+      } else {
+        aviso.classList.add('hidden');
+      }
+
+      renderResultado(data.days);
+      btn.textContent = 'Calcular pesos';
+      btn.disabled = false;
+    }
+
+    // ── RENDER ───────────────────────────────────────────────────────────────
+
+    function renderResultado(days) {
+      const section = document.getElementById('resultado');
+      section.classList.remove('hidden');
+
+      if (!days || !days.length) {
+        section.innerHTML = '<p class="warn">No se encontraron ejercicios. Comprueba el formato del plan.</p>';
+        return;
+      }
+
+      section.innerHTML = days.map(day => `
+        <div class="day-card">
+          <h2>${day.day}</h2>
+          ${day.exercises.map(exerciseHTML).join('')}
+        </div>
+      `).join('');
+
+      section.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function exerciseHTML(ex) {
+      const hasWeights = ex.series.some(s => s.weight !== null);
+
+      const rows = ex.series.map(s => {
+        const pctStr  = s.pct_lo !== null
+          ? (s.pct_hi !== null ? `${s.pct_lo}–${s.pct_hi}%` : `${s.pct_lo}%`)
+          : '—';
+        const kgStr   = s.weight !== null
+          ? (s.weight_hi !== null ? `${s.weight}–${s.weight_hi} kg` : `${s.weight} kg`)
+          : (s.pct_lo !== null ? '<span class="no-max">sin máximo</span>' : '—');
+        return `<tr>
+          <td>${s.sets}×${s.reps}</td>
+          <td class="pct-cell">${pctStr}</td>
+          <td class="kg-cell">${kgStr}</td>
+        </tr>`;
+      }).join('');
+
+      const notesHTML = ex.notes
+        ? `<p class="notes">${ex.notes}</p>`
+        : '';
+
+      return `
+        <div class="exercise">
+          <div class="ex-header">
+            <span class="letter-badge">${ex.letter}</span>
+            <span class="ex-name">${ex.name}</span>
+            <a class="yt-link" href="${ex.youtube_url}" target="_blank" rel="noopener">▶ Ver</a>
+          </div>
+          ${rows ? `<table class="series-table">
+            <thead><tr><th>Series</th><th>%</th><th>Peso</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>` : ''}
+          ${notesHTML}
+        </div>`;
+    }
+  </script>
+</body>
+</html>
