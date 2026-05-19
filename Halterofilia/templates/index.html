@@ -151,12 +151,16 @@
         return;
       }
 
-      section.innerHTML = days.map(day => `
-        <div class="day-card">
-          <h2>${day.day}</h2>
-          ${day.exercises.map(exerciseHTML).join('')}
-        </div>
-      `).join('');
+      section.innerHTML =
+        `<div class="print-toolbar">
+           <button class="btn-print" onclick="window.print()">🖨 Imprimir / Guardar PDF</button>
+         </div>` +
+        days.map(day => `
+          <div class="day-card">
+            <h2>${day.day}</h2>
+            ${day.exercises.map(exerciseHTML).join('')}
+          </div>
+        `).join('');
 
       section.scrollIntoView({ behavior: 'smooth' });
     }
